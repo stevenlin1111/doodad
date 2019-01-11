@@ -7,23 +7,32 @@ GCP_SHUTDOWN_SCRIPT_PATH = os.path.join(REPO_DIR, "scripts/gcp/gcp_shutdown_scri
 
 def upload_file_to_gcp_storage(
     bucket_name,
-    file_name,
+    file_name=None,
+    file_contents=None,
     remote_filename=None,
     dry=False,
-    check_exists=True
+    check_exists=True,
 ):
     from google.cloud import storage
+    assert file_name or file_contents, "must specify local filepath or contents"
+    assert not (file_name and file_contents)
+
     storage_client = storage.Client()
     bucket = storage_client.get_bucket(bucket_name)
 
     if remote_filename is None:
+        assert file_name
         remote_filename = os.path.basename(file_name)
     remote_path = 'doodad/mount/' + remote_filename
     blob = bucket.blob(remote_path)
     if check_exists and blob.exists(storage_client):
         print("{remote_path} already exists".format(remote_path=remote_path))
         return remote_path
-    blob.upload_from_filename(file_name)
+
+    if file_name:
+        blob.upload_from_filename(file_name)
+    elif file_contents:
+        blob.upload_from_string(file_contents)
     return remote_path
 
 def get_machine_type(zone, instance_type):

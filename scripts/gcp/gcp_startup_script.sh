@@ -27,6 +27,7 @@ query_metadata() {
     gcp_mounts=$(query_metadata gcp_mounts)
     use_gpu=$(query_metadata use_gpu)
     terminate=$(query_metadata terminate)
+    retry=$(query_metadata retry)
     instance_name=$(curl http://metadata/computeMetadata/v1/instance/name -H "Metadata-Flavor: Google")
     echo "bucket_name:" $bucket_name
     echo "docker_cmd:" $docker_cmd
@@ -56,19 +57,43 @@ query_metadata() {
         tar -xvf /tmp/$local_mount.tar -C /tmp/$local_mount
     done
 
+    if (($retry > 0)); then
+        echo "resuming experiment"
+        checkpoint_commands=$(query_metadata checkpoint_commands)
+        num_checkpoint_commands=$(jq length <<< $checkpoint_commands)
+        for ((i=0;i<$num_checkpoint_commands;i++)); do
+            sync_command=$(jq .[$i] <<< $checkpoint_commands | tr -d '"')
+            echo $sync_command
+            bash -c "$sync_command"
+        done
+    fi
+
     num_gcp_mounts=$(jq length <<< $gcp_mounts)
-    for ((i=0;i<$num_gcp_mounts;i++)); do
-        gcp_mount_info=$(jq .[$i] <<< $gcp_mounts)
-        # assume _mount_info is a (local_path, bucket_path, include_string, periodic_sync_interval) tuple
-        local_path=$(jq .[0] <<< $gcp_mount_info | tr -d '"')
-        gcp_bucket_path=$(jq .[1] <<< $gcp_mount_info | tr -d '"')
-        include_string=$(jq .[2] <<< $gcp_mount_info | tr -d '"')
-        periodic_sync_interval=$(jq .[3] <<< $gcp_mount_info | tr -d '"')
-        while /bin/true; do
+    while /bin/true; do
+        rm checkpoint_info
+        echo $instance_name > checkpoint_info
+        for ((i=0;i<$num_gcp_mounts;i++)); do
+            gcp_mount_info=$(jq .[$i] <<< $gcp_mounts)
+            # assume _mount_info is a (local_path, bucket_path, include_string, periodic_sync_interval) tuple
+            local_path=$(jq .[0] <<< $gcp_mount_info | tr -d '"')
+            gcp_bucket_path=$(jq .[1] <<< $gcp_mount_info | tr -d '"')
+            include_string=$(jq .[2] <<< $gcp_mount_info | tr -d '"')
+            periodic_sync_interval=$(jq .[3] <<< $gcp_mount_info | tr -d '"')
+
             gsutil -m rsync -r $local_path gs://$bucket_name/$gcp_bucket_path
-            sleep $periodic_sync_interval
-        done & echo sync from $local_path to gs://$bucket_name/$gcp_bucket_path initiated
-    done
+            # checkpoint dirs
+            ls $local_path > /tmp/checkpoint_ls
+            while read p; do
+                local_checkpoint_path=$(echo $local_path/$p | sed s#//*#/#g)
+                remote_checkpoint_path=gs://"$(echo $bucket_name/$gcp_bucket_path/"$p" | sed s#//*#/#g)"
+                echo "mkdir -p $local_checkpoint_path && gsutil -m rsync -r $remote_checkpoint_path $local_checkpoint_path" >> checkpoint_info
+            done < /tmp/checkpoint_ls
+
+            echo syncing from $local_path to gs://$bucket_name/$gcp_bucket_path
+        done
+        sleep $periodic_sync_interval
+    done &
+
     while /bin/true; do
         gsutil cp /home/ubuntu/user_data.log gs://$bucket_name/$gcp_bucket_path/${instance_name}_stdout.log
         sleep 300

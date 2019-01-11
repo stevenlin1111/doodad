@@ -6,6 +6,7 @@ import uuid
 import time
 import base64
 import json
+import pickle
 
 try:
     from StringIO import StringIO
@@ -641,6 +642,8 @@ class GCPDocker(DockerMode):
         gcp_log_name=None,
         gcp_log_path=None,
         gpu_kwargs=None,
+        dump_launch_config=False,
+        preemption_bucket=None,
         **kwargs
     ):
         super(GCPDocker, self).__init__(**kwargs)
@@ -666,7 +669,11 @@ class GCPDocker(DockerMode):
         import googleapiclient.discovery
         self.compute = googleapiclient.discovery.build('compute', 'v1')
 
-    def launch_command(self, main_cmd, mount_points=None, dry=False, verbose=False):
+        self.dump_launch_config = dump_launch_config
+        if self.dump_launch_config:
+            self.preemption_bucket = preemption_bucket
+
+    def launch_command(self, main_cmd, mount_points=None, dry=False, verbose=False, max_retries=2):
         if self.gcp_log_name is None:
             exp_name = "{}-{}".format(self.gcp_log_prefix, EC2SpotDocker.make_timekey(self))
         else:
@@ -729,6 +736,9 @@ class GCPDocker(DockerMode):
             'terminate': json.dumps(self.terminate),
             'startup-script': open(GCP_STARTUP_SCRIPT_PATH, "r").read(),
             'shutdown-script': open(GCP_SHUTDOWN_SCRIPT_PATH, "r").read(),
+            'retry': 0,
+            'max_retries': max_retries,
+            'preemption_bucket': self.preemption_bucket,
         }
         # instance name must match regex '(?:[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?)'">
         unique_name= "doodad" + str(uuid.uuid4()).replace("-", "")
@@ -785,11 +795,25 @@ class GCPDocker(DockerMode):
                       "acceleratorType": self.gpu_type,
                       "acceleratorCount": self.num_gpu,
             }]
-        return self.compute.instances().insert(
+
+        instance_launch_dict = dict(
             project=self.project,
             zone=self.zone,
             body=config
-        ).execute()
+        )
+        self.compute.instances().insert(**instance_launch_dict).execute()
+
+        if self.dump_launch_config:
+            # For resuming preempted experiments
+            launch_config_filename = 'launch_config/{instance_name}.pkl'.format(
+                instance_name=name
+            )
+            upload_file_to_gcp_storage(
+                bucket_name=self.preemption_bucket,
+                file_contents=pickle.dumps(instance_launch_dict),
+                remote_filename=launch_config_filename,
+            )
+
 
 class CodalabDocker(DockerMode):
     def __init__(self):
