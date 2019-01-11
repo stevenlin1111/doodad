@@ -70,8 +70,6 @@ query_metadata() {
 
     num_gcp_mounts=$(jq length <<< $gcp_mounts)
     while /bin/true; do
-        rm checkpoint_info
-        echo $instance_name > checkpoint_info
         for ((i=0;i<$num_gcp_mounts;i++)); do
             gcp_mount_info=$(jq .[$i] <<< $gcp_mounts)
             # assume _mount_info is a (local_path, bucket_path, include_string, periodic_sync_interval) tuple
@@ -81,19 +79,12 @@ query_metadata() {
             periodic_sync_interval=$(jq .[3] <<< $gcp_mount_info | tr -d '"')
 
             gsutil -m rsync -r $local_path gs://$bucket_name/$gcp_bucket_path
-            # checkpoint dirs
-            ls $local_path > /tmp/checkpoint_ls
-            while read p; do
-                local_checkpoint_path=$(echo $local_path/$p | sed s#//*#/#g)
-                remote_checkpoint_path=gs://"$(echo $bucket_name/$gcp_bucket_path/"$p" | sed s#//*#/#g)"
-                echo "mkdir -p $local_checkpoint_path && gsutil -m rsync -r $remote_checkpoint_path $local_checkpoint_path" >> checkpoint_info
-            done < /tmp/checkpoint_ls
-
             echo syncing from $local_path to gs://$bucket_name/$gcp_bucket_path
         done
         sleep $periodic_sync_interval
     done &
 
+    gcp_bucket_path=${gcp_bucket_path%/}  # remove trailing slash if present
     while /bin/true; do
         gsutil cp /home/ubuntu/user_data.log gs://$bucket_name/$gcp_bucket_path/${instance_name}_stdout.log
         sleep 300
@@ -113,6 +104,7 @@ query_metadata() {
 
     if [ "$terminate" = "true" ]; then
         echo "Finished experiment. Terminating"
+        gsutil cp /home/ubuntu/user_data.log gs://$bucket_name/$gcp_bucket_path/${instance_name}_stdout.log
         zone=$(curl http://metadata/computeMetadata/v1/instance/zone -H "Metadata-Flavor: Google")
         zone="${zone##*/}"
         gcloud compute instances delete $instance_name --zone $zone --quiet

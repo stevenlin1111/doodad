@@ -452,7 +452,7 @@ class EC2SpotDocker(DockerMode):
             sleep {periodic_sync_interval}
         done & echo sync initiated
         """.format(
-            s3_path=stdout_log_s3_path,
+            stdout_log_s3_path=stdout_log_s3_path,
             periodic_sync_interval=max_sync_interval
         ))
 
@@ -496,7 +496,6 @@ class EC2SpotDocker(DockerMode):
                 local_dir=local_output_dir,
                 s3_dir=s3_dir_path
             ))
-            
         sio.write("aws s3 cp /home/ubuntu/user_data.log {}\n".format(
             stdout_log_s3_path,
         ))
@@ -642,10 +641,13 @@ class GCPDocker(DockerMode):
         gcp_log_name=None,
         gcp_log_path=None,
         gpu_kwargs=None,
-        dump_launch_config=False,
         preemption_bucket=None,
         **kwargs
     ):
+        """
+        preemption_bucket: optional. Used if handling preemption. Dumps preemption
+            and checkpoint info this bucket.
+        """
         super(GCPDocker, self).__init__(**kwargs)
         assert 'CLOUDSDK_CORE_PROJECT' in os.environ.keys()
         self.project = os.environ['CLOUDSDK_CORE_PROJECT']
@@ -669,11 +671,13 @@ class GCPDocker(DockerMode):
         import googleapiclient.discovery
         self.compute = googleapiclient.discovery.build('compute', 'v1')
 
-        self.dump_launch_config = dump_launch_config
-        if self.dump_launch_config:
-            self.preemption_bucket = preemption_bucket
+        self.preemption_bucket = preemption_bucket
 
     def launch_command(self, main_cmd, mount_points=None, dry=False, verbose=False, max_retries=2):
+        """
+        max_retries: (int) max number of retries before relaunching as a
+            non-preemptible instance by the relaunch server
+        """
         if self.gcp_log_name is None:
             exp_name = "{}-{}".format(self.gcp_log_prefix, EC2SpotDocker.make_timekey(self))
         else:
@@ -803,7 +807,7 @@ class GCPDocker(DockerMode):
         )
         self.compute.instances().insert(**instance_launch_dict).execute()
 
-        if self.dump_launch_config:
+        if self.preemption_bucket:
             # For resuming preempted experiments
             launch_config_filename = 'launch_config/{instance_name}.pkl'.format(
                 instance_name=name
@@ -827,9 +831,9 @@ class SingularityMode(LaunchMode):
         super(SingularityMode, self).__init__()
         self.singularity_image = image
         self.gpu = gpu
+        self.skip_wait = skip_wait
         self.pre_cmd = pre_cmd
         self.post_cmd = post_cmd
-        self.skip_wait = skip_wait
 
     def get_singularity_cmd(
             self,
@@ -940,6 +944,7 @@ class SlurmSingularity(LocalSingularity):
             )
         if verbose:
             print(full_cmd)
+        return full_cmd
 
     def launch_command(self, cmd, mount_points=None, dry=False, verbose=False):
         full_cmd = self.create_slurm_command(
