@@ -32,6 +32,12 @@ if [ "$preempted" = "TRUE" ]; then
     preemption_bucket=$(query_metadata preemption_bucket)
     gsutil cp checkpoint_info gs://$preemption_bucket/preempted/$instance_name
 fi
+# ensure that $gcp_bucket_path is defined for the stdout log sync
+for ((i=0;i<$num_gcp_mounts;i++)); do
+    gcp_mount_info=$(jq .[$i] <<< $gcp_mounts)
+    gcp_bucket_path=$(jq .[1] <<< $gcp_mount_info | tr -d '"')
+done
+
 gsutil cp /home/ubuntu/user_data.log gs://$bucket_name/$gcp_bucket_path/${instance_name}_stdout.log
 
 for ((i=0;i<$num_gcp_mounts;i++)); do
@@ -43,7 +49,6 @@ for ((i=0;i<$num_gcp_mounts;i++)); do
 done
 
 } >> /home/ubuntu/terminate.log 2>&1
-gsutil cp /home/ubuntu/terminate.log gs://$bucket_name/$gcp_bucket_path/${instance_name}_terminate.log
 zone=$(curl http://metadata/computeMetadata/v1/instance/zone -H "Metadata-Flavor: Google")
 zone="${zone##*/}"
 gcloud compute instances delete $instance_name --zone $zone --quiet

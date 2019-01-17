@@ -111,4 +111,9 @@ if __name__ == "__main__":
                     instance_name=instance_name
                 )
                 logging.info(log_msg)
-        time.sleep(10)
+        upload_file_to_gcp_storage(
+            bucket_name=preemption_bucket,
+            file_name='gcp_restart.log',
+            check_exists=False,
+        )
+        time.sleep(60)

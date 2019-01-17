@@ -805,7 +805,21 @@ class GCPDocker(DockerMode):
             zone=self.zone,
             body=config
         )
-        self.compute.instances().insert(**instance_launch_dict).execute()
+        response = self.compute.instances().insert(**instance_launch_dict).execute()
+        # insert_operation_name = response['name']
+        # print("Waiting for insert to complete")
+        # while True:
+            # status = self.compute.zoneOperations().get(
+                # project=self.project,
+                # zone=self.zone,
+                # operation=insert_operation_name).execute()
+            # if status['status'] == 'DONE':
+                # if 'httpErrorStatusCode' in status:
+                    # print('Insert failed with errorcode: ', status['httpErrorStatusCode'])
+                # break
+            # time.sleep(1)
+
+        # import pdb; pdb.set_trace()
 
         if self.preemption_bucket:
             # For resuming preempted experiments

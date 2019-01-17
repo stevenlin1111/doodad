@@ -81,13 +81,9 @@ query_metadata() {
             gsutil -m rsync -r $local_path gs://$bucket_name/$gcp_bucket_path
             echo syncing from $local_path to gs://$bucket_name/$gcp_bucket_path
         done
-        sleep $periodic_sync_interval
-    done &
-
-    gcp_bucket_path=${gcp_bucket_path%/}  # remove trailing slash if present
-    while /bin/true; do
+        gcp_bucket_path=${gcp_bucket_path%/}  # remove trailing slash if present
         gsutil cp /home/ubuntu/user_data.log gs://$bucket_name/$gcp_bucket_path/${instance_name}_stdout.log
-        sleep 300
+        sleep $periodic_sync_interval
     done &
 
     if [ "$use_gpu" = "true" ]; then
